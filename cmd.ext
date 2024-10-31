@@ -1,0 +1,1 @@
+- python3 -m pip install -r ${CODEBUILD_SRC_DIR}/modules/common_resources/lambda/layers/reports_lambda/requirements.txt -t ${CODEBUILD_SRC_DIR}/modules/common_resources/lambda/layers/reports_lambda/layer/python
