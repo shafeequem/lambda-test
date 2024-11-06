@@ -1,0 +1,64 @@
+import boto3
+
+s3 = boto3.client('s3')
+
+# Configure the source prefixes as an array
+source_prefixes = ["Client1/Input", "Client2/Input", "Client3/Input"]
+
+def lambda_handler(event, context):
+    # Get bucket name and object key from the EventBridge event
+    bucket_name = event['detail']['requestParameters']['bucketName']
+    object_key = event['detail']['requestParameters']['key']
+    
+    # Determine if the object matches any of the source prefixes
+    matching_prefix = next((prefix for prefix in source_prefixes if object_key.startswith(prefix)), None)
+    
+    # If no matching prefix, exit
+    if not matching_prefix:
+        return {
+            'statusCode': 200,
+            'body': f'No matching prefix found for object {object_key}'
+        }
+    
+    # Remove the last folder from the matching prefix and add "ScannedSafeInput"
+    target_prefix = matching_prefix.rsplit('/', 1)[0] + "/ScannedSafeInput/"
+    new_object_key = target_prefix + object_key.split(matching_prefix + "/")[-1]
+    
+    # Check if the "MalwareScanStatus" tag is present and set to "NO_THREATS_FOUND"
+    response = s3.get_object_tagging(Bucket=bucket_name, Key=object_key)
+    tags = {tag['Key']: tag['Value'] for tag in response['TagSet']}
+    
+    if tags.get("MalwareScanStatus") == "NO_THREATS_FOUND":
+        # Attempt to copy the object to the target prefix
+        try:
+            copy_response = s3.copy_object(
+                Bucket=bucket_name,
+                CopySource={'Bucket': bucket_name, 'Key': object_key},
+                Key=new_object_key
+            )
+            
+            # Check if the copy operation was successful
+            if copy_response['ResponseMetadata']['HTTPStatusCode'] == 200:
+                # If successful, delete the original object
+                s3.delete_object(Bucket=bucket_name, Key=object_key)
+                
+                return {
+                    'statusCode': 200,
+                    'body': f'Object {object_key} successfully moved to {new_object_key}'
+                }
+            else:
+                return {
+                    'statusCode': 500,
+                    'body': f'Copy operation failed for object {object_key}'
+                }
+        
+        except Exception as e:
+            return {
+                'statusCode': 500,
+                'body': f'Error during copy or delete operation: {str(e)}'
+            }
+    else:
+        return {
+            'statusCode': 200,
+            'body': f'Object {object_key} does not meet the tag requirements'
+        }
