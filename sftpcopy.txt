@@ -1,0 +1,113 @@
+import os
+import json
+import boto3
+import paramiko
+from botocore.exceptions import ClientError
+
+# Initialize AWS clients
+s3_client = boto3.client('s3')
+secrets_manager_client = boto3.client('secretsmanager')
+
+def get_sftp_credentials(secret_name):
+    """Fetches SFTP credentials from AWS Secrets Manager."""
+    try:
+        secret_value = secrets_manager_client.get_secret_value(SecretId=secret_name)
+        secret = json.loads(secret_value['SecretString'])
+        return secret
+    except ClientError as e:
+        print(f"Error fetching secrets: {e}")
+        raise
+
+def lambda_handler(event, context):
+    # Fetch the operation type
+    operation = event.get('operation')
+    
+    # Define the Secrets Manager secret name
+    secret_name = os.environ['SECRETS_MANAGER_SECRET_NAME']
+    
+    # Fetch SFTP credentials from Secrets Manager
+    sftp_credentials = get_sftp_credentials(secret_name)
+    sftp_host = sftp_credentials['SFTP_HOST']
+    sftp_user = sftp_credentials['SFTP_USER']
+    sftp_password = sftp_credentials['SFTP_PASSWORD']
+    sftp_port = int(sftp_credentials.get('SFTP_PORT', 22))  # Default to port 22 if not specified
+    
+    # S3 and SFTP details from the event
+    s3_bucket = event.get('s3_bucket')
+    s3_prefix = event.get('s3_prefix')
+    s3_key = event.get('s3_key')
+    sftp_path = event.get('sftp_path')
+
+    try:
+        # Initialize Paramiko transport for SFTP
+        transport = paramiko.Transport((sftp_host, sftp_port))
+        transport.connect(username=sftp_user, password=sftp_password)
+        sftp = paramiko.SFTPClient.from_transport(transport)
+
+        if operation == 'copy_s3_folder_to_sftp':
+            # List all files in the specified S3 prefix
+            paginator = s3_client.get_paginator('list_objects_v2')
+            for page in paginator.paginate(Bucket=s3_bucket, Prefix=s3_prefix):
+                for obj in page.get('Contents', []):
+                    s3_file_key = obj['Key']
+                    local_path = f"/tmp/{os.path.basename(s3_file_key)}"
+
+                    # Download file from S3
+                    s3_client.download_file(s3_bucket, s3_file_key, local_path)
+                    print(f"Downloaded file from S3: {s3_file_key}")
+
+                    # Upload to SFTP
+                    sftp_target_path = f"{sftp_path}/{os.path.basename(s3_file_key)}"
+                    sftp.put(local_path, sftp_target_path)
+                    print(f"Uploaded file to SFTP: {sftp_target_path}")
+
+        elif operation == 'copy_s3_file_to_sftp':
+            # Download the specified file from S3 to /tmp
+            local_path = f"/tmp/{os.path.basename(s3_key)}"
+            s3_client.download_file(s3_bucket, s3_key, local_path)
+            print(f"Downloaded file from S3: {s3_key}")
+
+            # Upload to SFTP
+            sftp_target_path = f"{sftp_path}/{os.path.basename(s3_key)}"
+            sftp.put(local_path, sftp_target_path)
+            print(f"Uploaded file to SFTP: {sftp_target_path}")
+
+        elif operation == 'copy_sftp_folder_to_s3':
+            # List all files in the SFTP directory
+            files = sftp.listdir(sftp_path)
+            
+            for file_name in files:
+                sftp_file_path = f"{sftp_path}/{file_name}"
+                local_path = f"/tmp/{file_name}"
+
+                # Download file from SFTP to Lambda's /tmp directory
+                sftp.get(sftp_file_path, local_path)
+                print(f"Downloaded file from SFTP: {sftp_file_path}")
+
+                # Upload to S3
+                s3_key_target = f"{s3_prefix}/{file_name}" if s3_prefix else file_name
+                s3_client.upload_file(local_path, s3_bucket, s3_key_target)
+                print(f"Uploaded file to S3: {s3_key_target}")
+
+        else:
+            raise ValueError("Invalid operation. Use 'copy_s3_folder_to_sftp', 'copy_s3_file_to_sftp', or 'copy_sftp_folder_to_s3'.")
+
+    except ClientError as e:
+        print(f"S3 error: {e}")
+        raise
+    except paramiko.SSHException as e:
+        print(f"SFTP error: {e}")
+        raise
+    finally:
+        # Close SFTP connection
+        sftp.close()
+        transport.close()
+
+    return {
+        "status": "Success",
+        "operation": operation,
+        "s3_bucket": s3_bucket,
+        "s3_prefix": s3_prefix,
+        "s3_key": s3_key,
+        "sftp_path": sftp_path
+    }
