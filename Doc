@@ -1,0 +1,117 @@
+Databridge Terraform Module Documentation
+
+Overview
+Databridge is a Terraform module designed to automate the transfer of files between AWS S3 and an on-premise SFTP server. It supports both S3-to-SFTP and SFTP-to-S3 operations, with optional archiving and deletion capabilities to maintain source data organization. This module is fully customizable through Terraform input variables, making it adaptable for different use cases and environments.
+
+Key Features
+Automated Transfers: Configures AWS EventBridge schedules to trigger AWS Lambda functions for file transfer.
+Bidirectional Transfers: Supports transfers from S3 to SFTP and vice versa.
+Flexible Scheduling: Allows customizable scheduling with parameters such as interval and metric (e.g., minute, hour, day).
+Archiving: Optionally archives files after transfer to a designated folder for better organization.
+Deletion: Supports deleting files from the source after successful transfer.
+Table of Contents
+Prerequisites
+Architecture
+Input Variables
+Usage
+Output Variables
+Example Configuration
+Error Handling
+Security Considerations
+FAQ
+Troubleshooting
+1. Prerequisites
+AWS Account: Ensure you have access to an AWS account with permissions to manage IAM roles, Lambda, S3, and SFTP access.
+Terraform: Installed on your local machine or CI/CD pipeline.
+SFTP Server Access: Access credentials and hostname for the on-premise SFTP server, stored in AWS Secrets Manager for secure retrieval.
+2. Architecture
+Databridge leverages the following AWS services:
+
+AWS Lambda: The core function that initiates file transfers based on EventBridge triggers.
+AWS EventBridge: Configures schedules to trigger Lambda functions based on user-defined intervals.
+AWS S3: Stores files for transfer to/from the SFTP server.
+AWS Secrets Manager: Stores SFTP credentials for secure access during file transfer.
+The flow varies based on the direction of transfer:
+
+S3-to-SFTP: Files from S3 are downloaded to a Lambda temporary storage, then uploaded to the SFTP server.
+SFTP-to-S3: Files from SFTP are downloaded to Lambda, then uploaded to the specified S3 bucket and key.
+3. Input Variables
+Below is a list of required and optional variables to customize Databridge:
+
+s3_bucket (required): The S3 bucket name to/from which files are transferred.
+s3_prefix (optional): Prefix within the S3 bucket to identify specific folders or files.
+sftp_path (required): Path on the SFTP server to/from which files are transferred.
+operation (required): Operation to be performed; valid values are copy_s3_folder_to_sftp, copy_s3_file_to_sftp, and copy_sftp_folder_to_s3.
+interval (required): Time interval for scheduling; numeric value to determine the frequency.
+metric (required): Interval unit; options are minute, hour, or day.
+delete_from_source_after_copy (optional): If true, deletes files from the source after transfer.
+archive_source_file_after_copy (optional): If true, moves files to an archive folder on the source after transfer.
+secret_name (required): Name of the AWS Secrets Manager secret storing SFTP credentials.
+4. Usage
+Module Invocation
+
+To use the Databridge module in your Terraform configuration, add the following code snippet:
+
+module "databridge" {
+  source = "<module-source-path>"
+
+  s3_bucket                  = "my-s3-bucket"
+  s3_prefix                  = "path/to/folder"
+  sftp_path                  = "/remote/path"
+  operation                  = "copy_s3_folder_to_sftp"
+  interval                   = 5
+  metric                     = "minute"
+  delete_from_source_after_copy = true
+  archive_source_file_after_copy = true
+  secret_name                = "sftp-secret"
+}
+5. Output Variables
+The module provides the following output variables:
+
+lambda_function_name: The name of the Lambda function created for file transfers.
+eventbridge_schedule_arn: The ARN of the EventBridge rule triggering the Lambda function.
+6. Example Configuration
+Here are example configurations to illustrate different use cases:
+
+Example: S3-to-SFTP Transfer with Archiving
+
+module "databridge" {
+  source                     = "<module-source-path>"
+  s3_bucket                  = "example-bucket"
+  s3_prefix                  = "data/"
+  sftp_path                  = "/backup/"
+  operation                  = "copy_s3_folder_to_sftp"
+  interval                   = 10
+  metric                     = "minute"
+  archive_source_file_after_copy = true
+  secret_name                = "my-sftp-credentials"
+}
+Example: SFTP-to-S3 Transfer with Deletion
+
+module "databridge" {
+  source                     = "<module-source-path>"
+  s3_bucket                  = "example-bucket"
+  sftp_path                  = "/data"
+  operation                  = "copy_sftp_folder_to_s3"
+  interval                   = 1
+  metric                     = "hour"
+  delete_from_source_after_copy = true
+  secret_name                = "my-sftp-credentials"
+}
+7. Error Handling
+File Not Found: If the source file is missing, the Lambda function will log an error and skip the file.
+SFTP Connection Issues: If an SFTP connection error occurs, the module will retry based on AWS Lambda's retry settings.
+8. Security Considerations
+IAM Roles: Ensure least-privilege access for IAM roles, granting only the permissions required for S3, Lambda, Secrets Manager, and SFTP.
+Secrets Manager: Use AWS Secrets Manager to store SFTP credentials securely.
+9. FAQ
+Q: What happens if no files are found in the S3/SFTP source?
+A: The Lambda function logs a "No objects to process" message and terminates gracefully.
+
+Q: Can I trigger the transfer manually?
+A: Yes, you can invoke the Lambda function manually through the AWS console or AWS CLI.
+
+10. Troubleshooting
+File Not Found Errors: Ensure the correct paths are provided for both S3 and SFTP.
+Connection Timeout: Check the network connectivity to the SFTP server. Consider increasing the Lambda timeout if necessary.
+This page serves as a complete guide for configuring and deploying the Databridge module in various environments. For additional support, contact your internal DevOps team or refer to the AWS documentation for related services.
