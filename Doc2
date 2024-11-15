@@ -1,0 +1,135 @@
+Key Features
+
+Flexible Transfer Options: Supports multiple transfer operations:
+copy_s3_file_to_sftp: Copies a single file from S3 to the SFTP server.
+copy_s3_folder_to_sftp: Copies all files from an S3 folder to the SFTP server.
+copy_sftp_folder_to_s3: Copies all files from an SFTP folder to an S3 bucket.
+Archiving and Deletion: Automatically archive or delete files from the source after a successful transfer, based on specified parameters.
+Customizable Scheduling: Trigger transfers on a custom schedule (e.g., minutes, hours, days) using AWS EventBridge.
+Secure Credential Management: Utilizes AWS Secrets Manager to securely store and retrieve SFTP credentials.
+Modular and Reusable: Designed as a Terraform module, making it easy to integrate into any project needing S3-to-SFTP or SFTP-to-S3 data transfer.
+Architecture
+
+This solution leverages several AWS services:
+
+AWS Lambda for serverless file transfer.
+Amazon S3 as the cloud storage source/destination.
+AWS EventBridge for scheduling.
+AWS Secrets Manager for secure management of SFTP credentials.
+Diagram (Add a visual architecture diagram here to depict the flow)
+Pre-Requisites
+
+AWS Account with appropriate permissions to create and manage Lambda, S3, EventBridge, and Secrets Manager resources.
+SFTP Server accessible to the AWS environment.
+Terraform installed and configured on your local environment.
+Module Inputs
+
+Parameter	Type	Default	Description
+s3_bucket	string	N/A	The name of the S3 bucket to be used.
+s3_prefix	string	""	The S3 path prefix for files or folders.
+sftp_path	string	N/A	The destination path on the SFTP server.
+operation	string	N/A	Defines the type of file transfer (copy_s3_file_to_sftp, copy_s3_folder_to_sftp, copy_sftp_folder_to_s3).
+schedule	object	N/A	Configuration for scheduling, including frequency and interval.
+delete_from_source_after_copy	bool	false	If set to true, deletes files from the source after successful transfer.
+archive_source_file_after_copy	bool	false	If set to true, archives files in an ARCHIVE folder after successful transfer.
+secret_name	string	N/A	The name of the AWS Secrets Manager secret storing SFTP credentials.
+Sample Schedule Input
+The schedule object allows for customized timing for each transfer operation:
+
+schedule = {
+  name     = "databridge_daily"
+  metric   = "hour"
+  interval = 24
+}
+Usage
+
+Add Databridge Module to Your Terraform Code
+module "databridge" {
+  source                     = "path/to/databridge/module"
+  s3_bucket                  = "my-s3-bucket"
+  s3_prefix                  = "my-data/"
+  sftp_path                  = "/remote/data"
+  operation                  = "copy_s3_folder_to_sftp"
+  delete_from_source_after_copy = true
+  archive_source_file_after_copy = true
+  secret_name                = "sftp-credentials"
+  schedule                   = {
+    name     = "databridge_hourly"
+    metric   = "hour"
+    interval = 1
+  }
+}
+Terraform Initialization and Deployment
+Initialize and apply the configuration:
+
+terraform init
+terraform apply
+Module Outputs
+
+Output	Description
+lambda_arn	The Amazon Resource Name (ARN) of the deployed Lambda function.
+eventbridge_rule	The ARN of the EventBridge rule created for scheduling.
+Operations and Flow
+
+1. S3-to-SFTP Transfer (Folder)
+Triggers based on the schedule defined.
+Lists objects in the specified S3 prefix.
+For each file, it downloads to Lambda's /tmp directory, then uploads to the SFTP server.
+If delete_from_source_after_copy is enabled, files are deleted from S3 after a successful copy.
+If archive_source_file_after_copy is enabled, files are moved to an ARCHIVE/ folder.
+2. SFTP-to-S3 Transfer
+Connects to the SFTP server.
+Retrieves files from the specified SFTP path and uploads them to S3.
+Optionally archives or deletes files from the SFTP server after transfer.
+3. S3-to-SFTP Transfer (Single File)
+Similar to folder transfer, but for a single specified file.
+Uses the s3_key input to specify the exact file to transfer.
+Error Handling and Logging
+
+The Lambda function includes logging for each operation, including:
+
+Connection attempts to SFTP.
+File download and upload status.
+Success/failure messages for each file transfer.
+Archived/deleted file confirmations.
+In case of errors, the Lambda function will:
+
+Print detailed error logs for troubleshooting.
+Return a False status to indicate a failed transfer.
+Advanced Configuration
+
+EventBridge Schedule Customization
+You can customize the EventBridge schedule for the Lambda function using the following settings in the schedule parameter:
+
+metric: Frequency of the transfer (minute, hour, day).
+interval: Time interval for each transfer.
+Secrets Management
+This module relies on AWS Secrets Manager for secure credential storage. Ensure that:
+
+The secret is created with a JSON format:
+{
+  "SFTP_HOST": "example.com",
+  "SFTP_USER": "username",
+  "SFTP_PASSWORD": "password",
+  "SFTP_PORT": "22"
+}
+IAM permissions are granted to allow Lambda access to the specified secret.
+Troubleshooting and FAQs
+
+Common Issues
+File Not Found Error
+Ensure the correct file path is provided for S3 or SFTP.
+Verify permissions for S3 bucket and SFTP directory.
+SFTP Connection Dropping
+If connections drop during large transfers, try reducing the batch size or increasing the Lambda timeout setting.
+Lambda Disk Space Errors
+Ensure individual file sizes do not exceed /tmp storage limits (500 MB).
+For larger transfers, use streaming solutions or process files in smaller batches.
+FAQs
+Q: Can I use this module for SFTP-to-SFTP or S3-to-S3 transfers?
+A: Currently, Databridge supports only S3-to-SFTP and SFTP-to-S3 transfers.
+Q: How can I verify successful file transfers?
+A: Use the logs in CloudWatch to monitor each file transfer’s status.
+Conclusion
+
+Databridge is a robust, configurable solution for managing secure file transfers across AWS S3 and SFTP, designed to support a wide range of data integration needs. Its modular structure, combined with flexible scheduling and reliable archiving/deletion options, makes it ideal for organizations aiming to streamline data exchanges in a secure, automated manner.
